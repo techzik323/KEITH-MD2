@@ -1,62 +1,59 @@
-module.exports = async (messageDetails) => {
-  const { client: botClient, m: message, text: queryText } = messageDetails;
 
-  const ytSearch = require('yt-search');
-  const fetch = require('node-fetch');
+const yts = require("yt-search");
+const { youtubedl, youtubedlv2 } = require("api-dylux");
+
+
+module.exports = async (context) => {
+  const { client, m: message, text } = context;
+
+  async function searchVideos(query, options = {}) {
+    const searchOptions = {
+      query,
+      hl: 'es',
+      gl: 'ES',
+      ...options
+    };
+    const searchResults = await yts.search(searchOptions);
+    return searchResults.videos;
+  }
 
   try {
-    // Ensure that the queryText is not empty
-    if (!queryText || queryText.trim().length === 0) {
-      return message.reply("What song do you want to download?");
+    if (!text) {
+      message.reply("What video do you want to download?");
+      return;
     }
 
-    // Search for videos on YouTube based on the query text
-    const searchResults = await ytSearch(queryText);
-    if (searchResults && searchResults.videos.length > 0) {
-      const firstVideo = searchResults.videos[0];
-      const videoUrl = firstVideo.url;
+    const videos = await searchVideos(text);
+    const videoUrl = videos[0].url;
 
-      const chat = message.chat;
+    // Attempt to download the video
+    const videoData = await youtubedl(videoUrl).catch(async () => {
+      return await youtubedlv2(videoUrl);
+    });
 
-      // Fetch download link from an external API (without apikey)
-      const response = await fetch(`https://dark-yasiya-api-new.vercel.app/download/ytmp3?url=${encodeURIComponent(videoUrl)}`);
-      const downloadData = await response.json();
+    const videoFile = await videoData.video["360p"].download();
+    const videoTitle = await videoData.title;
 
-      if (downloadData.status === 200 && downloadData.success) {
-        const downloadUrl = downloadData.result.download_url;
+    // Prepare message with video
+    const videoMessage = {
+      url: videoFile,
+      fileName: `${videoTitle}.mp4`,
+      mimetype: "video/mp4",
+      caption: videoTitle
+    };
 
-        // Send message indicating that the download has started
-        await botClient.sendMessage(chat.id, { text: "*Downloading...*" }, { quoted: message });
+    await client.sendMessage(message.chat, videoMessage, { quoted: message });
 
-        // Send thumbnail and video info
-        const videoInfoMessage = {
-          image: { url: firstVideo.thumbnail },
-          caption: `*KEITH-MD AUDIO PLAYER*\n\n╭───────────────◆\n│ *Title:* ${downloadData.result.title}\n│ *Duration:* ${firstVideo.timestamp}\n│ *Artist:* ${firstVideo.author.name}\n╰────────────────◆`
-        };
-        await botClient.sendMessage(chat.id, videoInfoMessage, { quoted: message });
+    // Prepare document message
+    const documentMessage = {
+      document: { url: videoFile },
+      fileName: `${videoTitle}.mp4`,
+      mimetype: "video/mp4",
+      caption: videoTitle
+    };
 
-        // Send the audio file
-        await botClient.sendMessage(chat.id, {
-          audio: { url: downloadUrl },
-          mimetype: "audio/mp3"
-        }, { quoted: message });
-
-        // Optionally, send the audio as a downloadable file
-        await botClient.sendMessage(chat.id, {
-          document: { url: downloadUrl },
-          mimetype: "audio/mp3",
-          fileName: `${downloadData.result.title}.mp3`
-        }, { quoted: message });
-
-        // Final message to the user after download is complete
-        await message.reply(`*${downloadData.result.title}*\n\n*Downloaded successfully. Keep using Keith MD*`);
-      } else {
-        message.reply("Failed to download audio. Please try again later.");
-      }
-    } else {
-      message.reply("No audio found.");
-    }
+    await client.sendMessage(message.chat, documentMessage, { quoted: message });
   } catch (error) {
-    message.reply(`Download failed\n${error}`);
+    message.reply("Error\n" + error);
   }
 };
